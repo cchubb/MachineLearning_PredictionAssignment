@@ -1,0 +1,103 @@
+---
+title: "Machine Learning - Prediction Assignment"
+author: "Chris Chubb"
+date: "December 12, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:\\Users\\cchubb\\Coursera\\DataScience\\8MachineLearning\\MachineLearning_PredictionAssignment")
+rm(list = ls())
+library(caret)
+library(ggplot2)
+
+```
+
+## Problem Definition
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+```{r loaddata}
+if (! file.exists("data/pml-training.csv")) {
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "data/pml-training.csv")
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "data/pml-testing.csv")
+}
+
+training_all = read.csv("data/pml-training.csv", stringsAsFactors=FALSE, strip.white = TRUE, na.strings = c("", "NA", "#DIV/0!"))
+training_all$classe = as.factor(training_all$classe)
+testing_all = read.csv("data/pml-testing.csv", stringsAsFactors=FALSE, strip.white = TRUE, na.strings = c("", "NA", "#DIV/0!"))
+
+
+
+
+#Some basic messing around with the data
+#table(training_all$max_roll_belt, useNA = "ifany") #See how many NAs are in a column
+#table(training_all$max_yaw_arm, useNA = "ifany") #See how many NAs are in a column
+#table(training_all$avg_roll_forearm, useNA = "ifany") #See how many NAs are in a column
+
+#NAs <- unlist(lapply(training_all, function(x) sum(is.na(x))/length(x))) #What percentage of each column is NAs? #
+#Fields with NAs are usually 97% NA, so little use for those predictors
+#names(which(NAs > 0.9)) #Figure out which fields are primarily NA
+#training <- training_all[,names(which(NAs < 0.9))] #Throw out those predictors
+
+```
+
+## Exploratory Analysis and Data Shaping
+
+After examining the data, it was noticed that there were a number of fields that were predominately NA. Because NA values are not usable to most modeling algorithms, the NA fields were removed. In addition, variables that were row identifiers, timestamps and user identifiers were also removed. 
+
+```{r remove_na_predictors}
+NAs <- unlist(lapply(training_all, function(x) sum(is.na(x))/length(x))) #What percentage of each column is NA 
+NAs[1:7] <- 1; #Throw out X and the user and time series fields as well.
+
+#Split training data into training and validation
+set.seed(8675309)
+inTrain = createDataPartition(training_all$classe, p = 0.7, list=FALSE)
+
+training <- training_all[inTrain,names(which(NAs == 0))] #Throw out those predictors
+validation <- training_all[-inTrain,names(which(NAs == 0))]
+testing <- testing[,names(testing) %in% names(which(NAs == 0))]
+```
+
+After the un-useful variables have been removed, the next step is to check for other variables that may be highly correlated so that they may be removed in order to reduce bias. 
+
+```{r check_correlation}
+correlation_matrix <- cor(training[, names(training) != "classe"])
+#corrplot(correlation_matrix, method="color", order="FPC" type="lower", tl.cex=0.9, tl.col="black")
+heatmap(correlation_matrix, col=colorRampPalette(c("blue", "yellow", "blue"))(100))
+```
+
+There are 8 columns with a correlation at least 95%. 
+```{r highly correlated}
+rownames(cor_fields<-which((correlation_matrix < -0.95 | correlation_matrix > 0.95) & correlation_matrix != 1, arr.ind=TRUE))
+```
+
+Three of them are correlated with the others, so removing them will help reduce bias.
+
+```{r remove_correlated_fields}
+training <- training[, !(names(training) %in% c("total_accel_belt", "accel_belt_z", "roll_belt"))]
+validation <- validation[, !(names(validation) %in% c("total_accel_belt", "accel_belt_z", "roll_belt"))]
+testing <- testing[, !(names(testing) %in% c("total_accel_belt", "accel_belt_z", "roll_belt"))]
+
+```
+
+## First benchmark a couple of models
+
+
+```{r benchmark_models}
+set.seed(8675309)
+
+fitRPart <- train(classe ~ ., data=training, method="rpart", metric="Kappa")
+
+fitGLM <- train(classe ~ ., data=training, method="glm", metric="Kappa")
+
+
+fitRF <- train(classe ~ ., data=training, method="rf")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
