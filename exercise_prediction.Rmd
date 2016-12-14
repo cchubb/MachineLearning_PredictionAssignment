@@ -10,7 +10,8 @@ knitr::opts_chunk$set(echo = TRUE)
 setwd("C:\\Users\\cchubb\\Coursera\\DataScience\\8MachineLearning\\MachineLearning_PredictionAssignment")
 rm(list = ls())
 library(caret)
-library(ggplot2)
+#library(ggplot2)
+library(corrplot)
 
 ```
 
@@ -57,8 +58,7 @@ After the un-useful variables have been removed, the next step is to check for o
 
 ```{r check_correlation}
 correlation_matrix <- cor(training[, names(training) != "classe"])
-#corrplot(correlation_matrix, method="color", order="FPC" type="lower", tl.cex=0.9, tl.col="black")
-heatmap(correlation_matrix, col=colorRampPalette(c("blue", "yellow", "blue"))(100))
+corrplot(correlation_matrix, order = "hclust")
 ```
 
 There are 8 columns with a correlation at least 95%. 
