@@ -22,6 +22,8 @@ One thing that people regularly do is quantify how much of a particular activity
 
 Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
 
+### Data Loading
+
 ```{r loaddata}
 if (! file.exists("data/pml-training.csv")) {
   download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "data/pml-training.csv")
@@ -31,19 +33,6 @@ if (! file.exists("data/pml-training.csv")) {
 training_all = read.csv("data/pml-training.csv", stringsAsFactors=FALSE, strip.white = TRUE, na.strings = c("", "NA", "#DIV/0!"))
 training_all$classe = as.factor(training_all$classe)
 testing_all = read.csv("data/pml-testing.csv", stringsAsFactors=FALSE, strip.white = TRUE, na.strings = c("", "NA", "#DIV/0!"))
-
-
-
-
-#Some basic messing around with the data
-#table(training_all$max_roll_belt, useNA = "ifany") #See how many NAs are in a column
-#table(training_all$max_yaw_arm, useNA = "ifany") #See how many NAs are in a column
-#table(training_all$avg_roll_forearm, useNA = "ifany") #See how many NAs are in a column
-
-#NAs <- unlist(lapply(training_all, function(x) sum(is.na(x))/length(x))) #What percentage of each column is NAs? #
-#Fields with NAs are usually 97% NA, so little use for those predictors
-#names(which(NAs > 0.9)) #Figure out which fields are primarily NA
-#training <- training_all[,names(which(NAs < 0.9))] #Throw out those predictors
 
 ```
 
@@ -61,7 +50,7 @@ inTrain = createDataPartition(training_all$classe, p = 0.7, list=FALSE)
 
 training <- training_all[inTrain,names(which(NAs == 0))] #Throw out those predictors
 validation <- training_all[-inTrain,names(which(NAs == 0))]
-testing <- testing[,names(testing) %in% names(which(NAs == 0))]
+testing <- testing_all[,names(testing_all) %in% names(which(NAs == 0))]
 ```
 
 After the un-useful variables have been removed, the next step is to check for other variables that may be highly correlated so that they may be removed in order to reduce bias. 
@@ -83,21 +72,51 @@ Three of them are correlated with the others, so removing them will help reduce 
 training <- training[, !(names(training) %in% c("total_accel_belt", "accel_belt_z", "roll_belt"))]
 validation <- validation[, !(names(validation) %in% c("total_accel_belt", "accel_belt_z", "roll_belt"))]
 testing <- testing[, !(names(testing) %in% c("total_accel_belt", "accel_belt_z", "roll_belt"))]
-
+cols <- dim(training)[2] - 1
 ```
 
-## First benchmark a couple of models
+We are now left with `r cols` variables in the training set. 
 
+## First Model: Random Forests
+
+Random forests are an excellent method for building a classification model. As options we will be doing Principle Component Analysis as a first step to suppress unimportant variables, as well as using Cross Validation instead of bootstrapping as it is much faster. Because we are doing PCA, we need to apply the same PCA model to all data sets.
 
 ```{r benchmark_models}
 set.seed(8675309)
 
-fitRPart <- train(classe ~ ., data=training, method="rpart", metric="Kappa")
+PCA <- preProcess(training[,names(training) != "classe"], method="pca")
+training_PCA <- predict(PCA, training[,names(training) != "classe"])
+validation_PCA <- predict(PCA, validation[,names(training) != "classe"])
+testing_PCA <- predict(PCA, testing[,names(training) != "classe"])
 
-fitGLM <- train(classe ~ ., data=training, method="glm", metric="Kappa")
+training_PCA$classe <- training$classe 
+fitRF <- train(classe ~ ., data=training_PCA, 
+               method="rf", metric="Kappa",
+               trControl = trainControl(method="cv", number=4),
+               importance = TRUE,
+               trace = FALSE
+               )
 
-
-fitRF <- train(classe ~ ., data=training, method="rf")
+fitRF$finalModel
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Now that we have a model that appears to do a good job with the learning data, we try it against the validation data to test for over fitting. 
+
+```{r validation_run}
+validation_results <- predict(fitRF$finalModel, validation_PCA)
+
+confusionMatrix(validation$classe, validation_results)
+```
+
+Evaluting the model against the validation data shows a 97.7% accuracy, a very good results. I think the model is ready to run against the testing data. 
+
+```{r test_run}
+test_results <- predict(fitRF$finalModel, testing_PCA)
+test_results
+```
+
+## Notes 
+
+Additional models may produce better results, but computational complexity prevented me from testing larger cross validations or ensemble models. 
+
+
